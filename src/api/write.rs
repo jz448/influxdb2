@@ -8,7 +8,8 @@ use futures::{Stream, StreamExt};
 use reqwest::header::HeaderMap;
 use reqwest::{Body, Method, StatusCode};
 use snafu::ResultExt;
-use std::io::{self, Write};
+use std::convert::TryInto;
+use std::io::Write;
 
 impl Client {
     /// Write line protocol data to the specified organization and bucket.
@@ -98,12 +99,20 @@ impl Client {
     ) -> Result<(), RequestError> {
         let mut buffer = bytes::BytesMut::new();
 
-        let body = body.map(move |point| {
-            let mut w = (&mut buffer).writer();
-            point.write_data_point_to(&mut w)?;
-            w.flush()?;
-            Ok::<_, io::Error>(buffer.split().freeze())
-        });
+        // let body = body.map(move |point| {
+        //     let mut w = (&mut buffer).writer();
+        //     point.write_data_point_to(&mut w)?;
+        //     w.flush()?;
+        //     Ok::<_, io::Error>(buffer.split().freeze())
+        // });
+
+        let mut w = (&mut buffer).writer();
+
+        body.map(|point| {
+            point.write_data_point_to(&mut w).unwrap();
+        }).collect::<()>().await;
+        
+        w.flush().unwrap();
 
         #[cfg(feature = "gzip")]
         {
@@ -136,7 +145,8 @@ impl Client {
                 }
             }
         }
-        let body: Body = Body::wrap_stream(body);
+        // let body: Body = Body::wrap_stream(body);
+        let body: Body = buffer.freeze().try_into().unwrap();
 
         self.write_line_protocol_with_precision(&self.org, bucket, body, timestamp_precision)
             .await
